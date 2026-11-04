@@ -1,9 +1,11 @@
+import { StoredUsageRecordSchema, type UsageRecord } from '@usage-metering/shared';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildServer } from './server.js';
 import { createApiKeyChecker } from './auth.js';
 import type { HealthStatus } from './health.js';
 import { createIngestUsage, type UsageQueue } from './ingest.js';
+import { createListUsageRecords, type UsageReadRepository } from './usage-query.js';
 
 const API_KEY = 'test-api-key-0123456789';
 const ALLOWED_ORIGIN = 'http://localhost:5173';
@@ -20,13 +22,33 @@ const validRecord = {
 interface Harness {
   app: FastifyInstance;
   added: string[];
+  listCalls: { customerId: string; limit: number }[];
 }
 
 let current: FastifyInstance | undefined;
 
+const storedRecords: UsageRecord[] = [
+  { ...validRecord, recordId: '11111111-1111-4111-8111-111111111111', quantity: 2.5 },
+  { ...validRecord, recordId: '22222222-2222-4222-8222-222222222222' },
+];
+
 function setup(
-  opts: { queueFails?: boolean; health?: HealthStatus; healthThrows?: boolean } = {},
+  opts: {
+    queueFails?: boolean;
+    dbFails?: boolean;
+    health?: HealthStatus;
+    healthThrows?: boolean;
+  } = {},
 ): Harness {
+  const listCalls: { customerId: string; limit: number }[] = [];
+  const repo: UsageReadRepository = {
+    listByCustomer(customerId, limit) {
+      listCalls.push({ customerId, limit });
+      return opts.dbFails
+        ? Promise.reject(new Error('pg down: secret internals'))
+        : Promise.resolve(storedRecords);
+    },
+  };
   const added: string[] = [];
   const queue: UsageQueue = {
     add(_name, data) {
@@ -38,15 +60,16 @@ function setup(
   };
   const app = buildServer({
     ingest: createIngestUsage({ queue, now: () => NOW }),
+    listUsageRecords: createListUsageRecords({ repo }),
     checkApiKey: createApiKeyChecker(API_KEY),
     health: () =>
       opts.healthThrows
         ? Promise.reject(new Error('boom'))
-        : Promise.resolve(opts.health ?? { ok: true, redis: 'up' }),
+        : Promise.resolve(opts.health ?? { ok: true, redis: 'up', postgres: 'up' }),
     config: { bodyLimitBytes: 1024, corsOrigins: [ALLOWED_ORIGIN] },
   });
   current = app;
-  return { app, added };
+  return { app, added, listCalls };
 }
 
 afterEach(async () => {
@@ -166,19 +189,132 @@ describe('POST /usage', () => {
   });
 });
 
+const getRecords = (app: FastifyInstance, query: string, headers: Record<string, string> = {}) =>
+  app.inject({
+    method: 'GET',
+    url: `/usage/records${query}`,
+    headers: { 'x-api-key': API_KEY, ...headers },
+  });
+
+describe('GET /usage/records', () => {
+  it('returns 200 with records that match the shared schema', async () => {
+    const { app, listCalls } = setup();
+    const res = await getRecords(app, '?customerId=cust_42&limit=2');
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{ records: unknown[] }>();
+    expect(body).toEqual({ records: storedRecords });
+    for (const r of body.records) {
+      expect(StoredUsageRecordSchema.safeParse(r).success).toBe(true);
+    }
+    expect(listCalls).toEqual([{ customerId: 'cust_42', limit: 2 }]);
+  });
+
+  it('defaults limit to 100', async () => {
+    const { app, listCalls } = setup();
+    await getRecords(app, '?customerId=cust_42');
+    expect(listCalls).toEqual([{ customerId: 'cust_42', limit: 100 }]);
+  });
+
+  it.each([
+    '',
+    '?customerId=',
+    '?customerId=c&limit=0',
+    '?customerId=c&limit=501',
+    '?customerId=c&x=1',
+  ])('returns 400 validation_failed for %j', async (query) => {
+    const { app, listCalls } = setup();
+    const res = await getRecords(app, query);
+    expect(res.statusCode).toBe(400);
+    const body = res.json<{ error: string; errors: { path: string; message: string }[] }>();
+    expect(body.error).toBe('validation_failed');
+    expect(body.errors.length).toBeGreaterThan(0);
+    expect(Object.keys(body.errors[0] ?? {}).sort()).toEqual(['message', 'path']);
+    expect(listCalls).toHaveLength(0);
+  });
+
+  it.each([
+    ['missing', {}],
+    ['wrong', { 'x-api-key': 'not-the-right-key-at-all' }],
+  ])('rejects a %s API key with 401 and does not query', async (_label, headers) => {
+    const { app, listCalls } = setup();
+    const res = await app.inject({
+      method: 'GET',
+      url: '/usage/records?customerId=cust_42',
+      headers,
+    });
+    expect(res.statusCode).toBe(401);
+    expect(res.headers['www-authenticate']).toBe('ApiKey');
+    expect(listCalls).toHaveLength(0);
+  });
+
+  it('returns 503 with Retry-After and no internals when the database fails', async () => {
+    const { app } = setup({ dbFails: true });
+    const res = await getRecords(app, '?customerId=cust_42');
+    expect(res.statusCode).toBe(503);
+    expect(res.headers['retry-after']).toBe('5');
+    expect(res.json()).toEqual({
+      error: 'database_unavailable',
+      message: 'Database unavailable, retry later',
+    });
+    expect(res.body).not.toContain('secret internals');
+  });
+
+  it('adds CORS headers for the allowed origin on success, 401, 400 and 503', async () => {
+    const origin = { origin: ALLOWED_ORIGIN };
+    const ok = await getRecords(setup().app, '?customerId=c', origin);
+    expect(ok.statusCode).toBe(200);
+    expect(ok.headers['access-control-allow-origin']).toBe(ALLOWED_ORIGIN);
+    const bad = await getRecords(setup().app, '', origin);
+    expect(bad.statusCode).toBe(400);
+    expect(bad.headers['access-control-allow-origin']).toBe(ALLOWED_ORIGIN);
+    const down = await getRecords(setup({ dbFails: true }).app, '?customerId=c', origin);
+    expect(down.statusCode).toBe(503);
+    expect(down.headers['access-control-allow-origin']).toBe(ALLOWED_ORIGIN);
+    const unauth = await setup().app.inject({
+      method: 'GET',
+      url: '/usage/records?customerId=c',
+      headers: origin,
+    });
+    expect(unauth.statusCode).toBe(401);
+    expect(unauth.headers['access-control-allow-origin']).toBe(ALLOWED_ORIGIN);
+  });
+
+  it('answers a GET preflight from the allowed origin without an API key', async () => {
+    const { app } = setup();
+    const res = await app.inject({
+      method: 'OPTIONS',
+      url: '/usage/records',
+      headers: {
+        origin: ALLOWED_ORIGIN,
+        'access-control-request-method': 'GET',
+        'access-control-request-headers': 'x-api-key',
+      },
+    });
+    expect(res.statusCode).toBe(204);
+    expect(res.headers['access-control-allow-origin']).toBe(ALLOWED_ORIGIN);
+  });
+});
+
 describe('GET /health', () => {
-  it('returns 200 without an API key when Redis is up', async () => {
+  it('returns 200 without an API key when Redis and Postgres are up', async () => {
     const { app } = setup();
     const res = await app.inject({ method: 'GET', url: '/health' });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ status: 'ok', redis: 'up' });
+    expect(res.json()).toEqual({ status: 'ok', redis: 'up', postgres: 'up' });
   });
 
   it('returns 503 when Redis is down', async () => {
-    const { app } = setup({ health: { ok: false, redis: 'down' } });
+    const { app } = setup({ health: { ok: false, redis: 'down', postgres: 'up' } });
     const res = await app.inject({ method: 'GET', url: '/health' });
     expect(res.statusCode).toBe(503);
-    expect(res.json()).toEqual({ status: 'degraded', redis: 'down' });
+    expect(res.json()).toEqual({ status: 'degraded', redis: 'down', postgres: 'up' });
+  });
+
+  it('returns 503 when Postgres is down', async () => {
+    const { app } = setup({ health: { ok: false, redis: 'up', postgres: 'down' } });
+    const res = await app.inject({ method: 'GET', url: '/health' });
+    expect(res.statusCode).toBe(503);
+    expect(res.json()).toEqual({ status: 'degraded', redis: 'up', postgres: 'down' });
   });
 
   it('returns a generic 500 without a stack if the health check itself throws', async () => {

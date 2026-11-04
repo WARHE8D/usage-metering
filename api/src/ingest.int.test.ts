@@ -3,33 +3,44 @@ import type { UsageRecord } from '@usage-metering/shared';
 import type { Queue } from 'bullmq';
 import type { FastifyInstance } from 'fastify';
 import type { Redis } from 'ioredis';
+import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildServer } from './server.js';
 import { createApiKeyChecker } from './auth.js';
 import { createHealthCheck } from './health.js';
 import { createIngestUsage } from './ingest.js';
+import { createPgUsageReadRepository } from './pg-read-repository.js';
 import { connectRedis, createBullUsageQueue } from './queue.js';
+import { createListUsageRecords } from './usage-query.js';
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379';
+const DATABASE_URL = process.env.DATABASE_URL ?? '';
 const API_KEY = 'integration-test-key-0123';
 
 interface Stack {
   app: FastifyInstance;
   queue: Queue<UsageRecord>;
   connection: Redis;
+  pool: pg.Pool;
 }
 
 /** Wires the real app to real Redis on a throwaway queue (never the live "usage" queue). */
 async function buildStack(queueName: string): Promise<Stack> {
   const connection = await connectRedis(REDIS_URL);
+  const pool = new pg.Pool({ connectionString: DATABASE_URL, max: 2 });
   const { queue, usageQueue } = createBullUsageQueue(connection, queueName);
   const app = buildServer({
     ingest: createIngestUsage({ queue: usageQueue }),
+    listUsageRecords: createListUsageRecords({ repo: createPgUsageReadRepository(pool) }),
     checkApiKey: createApiKeyChecker(API_KEY),
-    health: createHealthCheck({ ping: () => connection.ping(), timeoutMs: 1000 }),
+    health: createHealthCheck({
+      ping: () => connection.ping(),
+      pingDb: () => pool.query('SELECT 1'),
+      timeoutMs: 1000,
+    }),
     config: { bodyLimitBytes: 16_384, corsOrigins: ['http://localhost:5173'] },
   });
-  return { app, queue, connection };
+  return { app, queue, connection, pool };
 }
 
 function newRecord(): UsageRecord {
@@ -63,6 +74,7 @@ describe('ingest against real Redis', () => {
     await stack.queue.obliterate({ force: true });
     await stack.queue.close();
     await stack.connection.quit();
+    await stack.pool.end();
   });
 
   it('enqueues a posted record with jobId = recordId and the shared job options', async () => {
@@ -94,14 +106,14 @@ describe('ingest against real Redis', () => {
   it('reports healthy against live Redis', async () => {
     const res = await stack.app.inject({ method: 'GET', url: '/health' });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ status: 'ok', redis: 'up' });
+    expect(res.json()).toEqual({ status: 'ok', redis: 'up', postgres: 'up' });
   });
 });
 
 describe('ingest when Redis goes away', () => {
   it('fails fast with 503 (not a hang) and health turns 503', async () => {
     const queueName = `usage-test-${randomUUID()}`;
-    const { app, queue, connection } = await buildStack(queueName);
+    const { app, queue, connection, pool } = await buildStack(queueName);
     try {
       // Simulate an outage after a healthy start.
       connection.disconnect();
@@ -117,6 +129,7 @@ describe('ingest when Redis goes away', () => {
     } finally {
       await app.close();
       await queue.close().catch(() => undefined);
+      await pool.end();
     }
   });
 

@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { loadApiConfig } from './config.js';
 
 const SECRET = 'a-very-secret-key-123';
-const base = { REDIS_URL: 'redis://localhost:6379', API_KEY: SECRET };
+const base = {
+  REDIS_URL: 'redis://localhost:6379',
+  DATABASE_URL: 'postgres://u:p@localhost:5432/db',
+  API_KEY: SECRET,
+};
 
 describe('loadApiConfig', () => {
   it('applies defaults for optional vars', () => {
@@ -10,6 +14,7 @@ describe('loadApiConfig', () => {
       port: 3000,
       host: '0.0.0.0',
       redisUrl: 'redis://localhost:6379',
+      databaseUrl: 'postgres://u:p@localhost:5432/db',
       apiKey: SECRET,
       bodyLimitBytes: 16_384,
       corsOrigins: ['http://localhost:5173'],
@@ -63,8 +68,9 @@ describe('loadApiConfig', () => {
   });
 
   it.each([
-    ['REDIS_URL missing', { API_KEY: SECRET }, 'REDIS_URL'],
-    ['API_KEY missing', { REDIS_URL: base.REDIS_URL }, 'API_KEY'],
+    ['REDIS_URL missing', { DATABASE_URL: base.DATABASE_URL, API_KEY: SECRET }, 'REDIS_URL'],
+    ['DATABASE_URL missing', { REDIS_URL: base.REDIS_URL, API_KEY: SECRET }, 'DATABASE_URL'],
+    ['API_KEY missing', { REDIS_URL: base.REDIS_URL, DATABASE_URL: base.DATABASE_URL }, 'API_KEY'],
     ['API_KEY too short', { ...base, API_KEY: 'short' }, 'API_KEY'],
     ['non-numeric port', { ...base, API_PORT: 'abc' }, 'API_PORT'],
     ['port out of range', { ...base, API_PORT: '70000' }, 'API_PORT'],
@@ -81,6 +87,7 @@ describe('loadApiConfig', () => {
     try {
       loadApiConfig({
         REDIS_URL: 'redis://user:pw@host:6379',
+        DATABASE_URL: 'postgres://usr:dbpw@dbhost:5432/db',
         API_KEY: shortSecret,
         API_PORT: 'x',
       });
@@ -90,5 +97,6 @@ describe('loadApiConfig', () => {
     expect(message).toContain('API_KEY');
     expect(message).not.toContain(shortSecret);
     expect(message).not.toContain('pw@host');
+    expect(message).not.toContain('dbpw');
   });
 });

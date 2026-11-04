@@ -2,7 +2,10 @@ import { buildServer } from './server.js';
 import { createApiKeyChecker } from './auth.js';
 import { loadApiConfig } from './config.js';
 import { createHealthCheck } from './health.js';
+import pg from 'pg';
 import { createIngestUsage } from './ingest.js';
+import { createPgUsageReadRepository } from './pg-read-repository.js';
+import { createListUsageRecords } from './usage-query.js';
 import { connectRedis, createBullUsageQueue } from './queue.js';
 import { startupMessage } from './startup.js';
 
@@ -25,10 +28,23 @@ const connection = await orExit('Cannot connect to Redis at startup', () =>
 );
 const { queue, usageQueue } = createBullUsageQueue(connection);
 
+const pool = new pg.Pool({
+  connectionString: config.databaseUrl,
+  max: 10,
+  connectionTimeoutMillis: 5000,
+  idleTimeoutMillis: 30_000,
+});
+await orExit('Cannot connect to Postgres at startup', () => pool.query('SELECT 1'));
+
 const app = buildServer({
   ingest: createIngestUsage({ queue: usageQueue }),
+  listUsageRecords: createListUsageRecords({ repo: createPgUsageReadRepository(pool) }),
   checkApiKey: createApiKeyChecker(config.apiKey),
-  health: createHealthCheck({ ping: () => connection.ping(), timeoutMs: HEALTH_TIMEOUT_MS }),
+  health: createHealthCheck({
+    ping: () => connection.ping(),
+    pingDb: () => pool.query('SELECT 1'),
+    timeoutMs: HEALTH_TIMEOUT_MS,
+  }),
   config: { bodyLimitBytes: config.bodyLimitBytes, corsOrigins: config.corsOrigins },
   logger: { level: config.logLevel, redact: ['req.headers["x-api-key"]'] },
 });
@@ -36,6 +52,11 @@ const app = buildServer({
 // Without a listener, ioredis connection errors would be unhandled 'error' events.
 connection.on('error', (err: unknown) => {
   app.log.warn({ err }, 'redis connection error');
+});
+
+// Idle clients emit errors when Postgres restarts; without a listener the process crashes.
+pool.on('error', (err) => {
+  app.log.error({ err }, 'idle postgres client error');
 });
 
 let shuttingDown = false;
@@ -51,6 +72,7 @@ async function shutdown(signal: string): Promise<void> {
   try {
     await app.close(); // stop accepting, drain in-flight requests
     await queue.close();
+    await pool.end();
     await connection.quit().catch(() => {
       connection.disconnect();
     });

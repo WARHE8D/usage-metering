@@ -5,9 +5,11 @@ import type { ApiKeyChecker } from './auth.js';
 import type { ApiConfig } from './config.js';
 import type { HealthCheck } from './health.js';
 import type { IngestUsage } from './ingest.js';
+import type { ListUsageRecords } from './usage-query.js';
 
 export interface ServerDeps {
   ingest: IngestUsage;
+  listUsageRecords: ListUsageRecords;
   checkApiKey: ApiKeyChecker;
   health: HealthCheck;
   config: Pick<ApiConfig, 'bodyLimitBytes' | 'corsOrigins'>;
@@ -70,9 +72,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   // Public: readiness probe.
   app.get('/health', async (_request, reply) => {
     const health = await deps.health();
-    return reply
-      .code(health.ok ? 200 : 503)
-      .send({ status: health.ok ? 'ok' : 'degraded', redis: health.redis });
+    return reply.code(health.ok ? 200 : 503).send({
+      status: health.ok ? 'ok' : 'degraded',
+      redis: health.redis,
+      postgres: health.postgres,
+    });
   });
 
   // Everything registered in this scope requires x-api-key. The check runs in
@@ -101,6 +105,22 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
             .code(503)
             .header('retry-after', String(RETRY_AFTER_SECONDS))
             .send({ error: 'queue_unavailable', message: 'Queue unavailable, retry later' });
+      }
+    });
+
+    scope.get('/usage/records', async (request, reply) => {
+      const result = await deps.listUsageRecords(request.query);
+      switch (result.status) {
+        case 'ok':
+          return reply.code(200).send({ records: result.records });
+        case 'invalid':
+          return reply.code(400).send({ error: 'validation_failed', errors: result.errors });
+        case 'unavailable':
+          request.log.error({ err: result.cause }, 'usage query failed');
+          return reply
+            .code(503)
+            .header('retry-after', String(RETRY_AFTER_SECONDS))
+            .send({ error: 'database_unavailable', message: 'Database unavailable, retry later' });
       }
     });
 

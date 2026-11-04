@@ -8,8 +8,10 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { createApiKeyChecker } from '../../api/src/auth.js';
 import { createHealthCheck } from '../../api/src/health.js';
 import { createIngestUsage } from '../../api/src/ingest.js';
+import { createPgUsageReadRepository } from '../../api/src/pg-read-repository.js';
 import { connectRedis as connectProducerRedis, createBullUsageQueue } from '../../api/src/queue.js';
 import { buildServer } from '../../api/src/server.js';
+import { createListUsageRecords } from '../../api/src/usage-query.js';
 import {
   BULLMQ_REDIS_OPTIONS,
   PUBLISHER_REDIS_OPTIONS,
@@ -88,8 +90,13 @@ async function buildStack(): Promise<Stack> {
   const { queue, usageQueue } = createBullUsageQueue(producerConnection, queueName);
   const app = buildServer({
     ingest: createIngestUsage({ queue: usageQueue }),
+    listUsageRecords: createListUsageRecords({ repo: createPgUsageReadRepository(pool) }),
     checkApiKey: createApiKeyChecker(API_KEY),
-    health: createHealthCheck({ ping: () => producerConnection.ping(), timeoutMs: 1000 }),
+    health: createHealthCheck({
+      ping: () => producerConnection.ping(),
+      pingDb: () => pool.query('SELECT 1'),
+      timeoutMs: 1000,
+    }),
     config: { bodyLimitBytes: 16_384, corsOrigins: [] },
   });
   await app.ready();

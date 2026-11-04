@@ -38,6 +38,7 @@ const envSchema = z.object({
   API_PORT: z.coerce.number().int().min(1).max(65_535).default(3000),
   API_HOST: z.string().min(1).default('0.0.0.0'),
   REDIS_URL: z.string().min(1),
+  DATABASE_URL: z.string().min(1),
   API_KEY: z.string().min(16),
   API_BODY_LIMIT_BYTES: z.coerce.number().int().positive().default(16_384),
   LOG_LEVEL: z.enum(LOG_LEVELS).default('info'),
@@ -49,6 +50,7 @@ export interface ApiConfig {
   port: number;
   host: string;
   redisUrl: string;
+  databaseUrl: string;
   apiKey: string;
   bodyLimitBytes: number;
   corsOrigins: string[];
@@ -57,7 +59,7 @@ export interface ApiConfig {
 
 /**
  * Validates env vars. Throws an Error that names the offending variables but
- * never echoes their values (API_KEY and REDIS_URL may hold secrets).
+ * never echoes their values (API_KEY, REDIS_URL and DATABASE_URL may hold secrets).
  */
 export function loadApiConfig(env: Record<string, string | undefined>): ApiConfig {
   const parsed = envSchema.safeParse(env);
@@ -72,6 +74,7 @@ export function loadApiConfig(env: Record<string, string | undefined>): ApiConfi
     port: c.API_PORT,
     host: c.API_HOST,
     redisUrl: c.REDIS_URL,
+    databaseUrl: c.DATABASE_URL,
     apiKey: c.API_KEY,
     bodyLimitBytes: c.API_BODY_LIMIT_BYTES,
     corsOrigins: c.CORS_ORIGINS,
