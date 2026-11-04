@@ -35,3 +35,6 @@ GET /usage serves the React page. Local infra via docker-compose (Postgres + Red
 - npm run dev:api | dev:worker | dev:web
 - npm test (unit) | npm run test:int (needs docker compose up)
 - npm run build
+
+
+-- add Context7 for up-to-date, version-specific documentation and code examples directly from the source. Paste accurate, relevant documentation into tools like Cursor, Claude, or any LLM, and get better answers with no hallucinations.
