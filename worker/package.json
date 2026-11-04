@@ -9,6 +9,8 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@usage-metering/shared": "*"
+    "@usage-metering/shared": "*",
+    "pino": "^10.4.0",
+    "zod": "^4.6.7"
   }
 }
