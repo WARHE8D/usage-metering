@@ -32,8 +32,15 @@ GET /usage serves the React page. Local infra via docker-compose (Postgres + Red
   version-specific docs with the Context7 MCP server instead of relying on memory.
 
 ## Commands
-(Planned — update once package.json and docker-compose.yml exist.)
-- docker compose up -d      start Postgres + Redis
-- npm run dev:api | dev:worker | dev:web
-- npm test (unit) | npm run test:int (needs docker compose up)
-- npm run build
+npm workspaces monorepo (Node >= 22, ESM). Shared is imported as `@usage-metering/shared`;
+its `development` export condition points at src, so dev/test need no prior build.
+- npm install               install all workspaces
+- npm run dev:api | dev:worker | dev:web   (tsx watch / vite)
+- npm test                  unit tests (Vitest projects unit-node + unit-web; *.test.ts[x])
+- npm run test:int          integration tests (*.int.test.ts; needs docker compose up)
+- npm run build             tsc -b (project refs) then vite build for web
+- npm run lint | format | format:check   ESLint (type-aware) / Prettier
+- docker compose up -d      start Postgres + Redis (planned — docker-compose.yml not yet added)
+
+Toolchain pins: TypeScript ~6.0 (typescript-eslint requires < 6.1). eslint-plugin-react is
+not used because it does not support ESLint 10 yet; react-hooks rules apply to web/ only.
