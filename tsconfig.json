@@ -2,6 +2,7 @@
   "files": [],
   "references": [
     { "path": "./shared" },
+    { "path": "./db" },
     { "path": "./api" },
     { "path": "./worker" },
     { "path": "./web" }

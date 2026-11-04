@@ -40,7 +40,8 @@ its `development` export condition points at src, so dev/test need no prior buil
 - npm run test:int          integration tests (*.int.test.ts; needs docker compose up)
 - npm run build             tsc -b (project refs) then vite build for web
 - npm run lint | format | format:check   ESLint (type-aware) / Prettier
-- docker compose up -d      start Postgres + Redis (planned — docker-compose.yml not yet added)
+- docker compose up -d      start Postgres + Redis (copy .env.example to .env first)
+- npm run db:migrate        apply db/*.sql in order (tracked in schema_migrations; safe to rerun)
 
 Toolchain pins: TypeScript ~6.0 (typescript-eslint requires < 6.1). eslint-plugin-react is
 not used because it does not support ESLint 10 yet; react-hooks rules apply to web/ only.

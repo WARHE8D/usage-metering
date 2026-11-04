@@ -8,7 +8,7 @@ export default defineConfig({
         test: {
           name: 'unit-node',
           environment: 'node',
-          include: ['{shared,api,worker}/src/**/*.test.ts'],
+          include: ['{shared,api,worker,db}/src/**/*.test.ts'],
           exclude: ['**/*.int.test.ts', '**/node_modules/**', '**/dist/**'],
         },
       },

@@ -6,6 +6,7 @@
     "node": ">=22"
   },
   "workspaces": [
+    "db",
     "shared",
     "api",
     "worker",
@@ -15,13 +16,14 @@
     "build": "tsc -b && npm run build -w web",
     "build:clean": "tsc -b --clean",
     "test": "vitest run --project unit-node --project unit-web",
-    "test:int": "vitest run --project integration --passWithNoTests",
+    "test:int": "node --env-file-if-exists=.env node_modules/vitest/vitest.mjs run --project integration --passWithNoTests",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "dev:api": "npm run dev -w api",
     "dev:worker": "npm run dev -w worker",
-    "dev:web": "npm run dev -w web"
+    "dev:web": "npm run dev -w web",
+    "db:migrate": "npm run migrate -w db"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
