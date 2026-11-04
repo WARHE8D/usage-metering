@@ -10,10 +10,11 @@
     "shared",
     "api",
     "worker",
+    "e2e",
     "web"
   ],
   "scripts": {
-    "build": "tsc -b && npm run build -w web",
+    "build": "tsc -b && npm run build -w e2e && npm run build -w web",
     "build:clean": "tsc -b --clean",
     "test": "vitest run --project unit-node --project unit-web",
     "test:int": "node --env-file-if-exists=.env node_modules/vitest/vitest.mjs run --project integration --passWithNoTests",

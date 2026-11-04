@@ -1,0 +1,19 @@
+{
+  "name": "@usage-metering/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@usage-metering/shared": "*"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1",
+    "bullmq": "^6.5.4",
+    "fastify": "^5.12.8",
+    "ioredis": "^6.0.0",
+    "pg": "^8.23.1"
+  }
+}
