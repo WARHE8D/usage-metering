@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # Test-only credentials matching the service containers below (no real secrets).
+    env:
+      DATABASE_URL: postgres://usage:usage@localhost:5432/usage_metering
+      REDIS_URL: redis://localhost:6379
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: usage
+          POSTGRES_PASSWORD: usage
+          POSTGRES_DB: usage_metering
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U usage -d usage_metering"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+          --health-start-period 10s
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - run: npm test
+      - run: npm run db:migrate
+      - run: npm run test:int
