@@ -20,6 +20,8 @@ services:
   redis:
     image: redis:7
     restart: unless-stopped
+    # BullMQ needs noeviction; AOF keeps accepted (queued) records across restarts.
+    command: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
     ports:
       - '6379:6379'
     volumes:

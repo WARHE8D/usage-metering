@@ -9,6 +9,10 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@usage-metering/shared": "*"
+    "@usage-metering/shared": "*",
+    "bullmq": "^6.5.4",
+    "fastify": "^5.12.8",
+    "ioredis": "^6.0.0",
+    "zod": "^4.6.7"
   }
 }
