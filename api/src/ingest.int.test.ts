@@ -4,7 +4,7 @@ import type { Queue } from 'bullmq';
 import type { FastifyInstance } from 'fastify';
 import type { Redis } from 'ioredis';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { buildApp } from './app.js';
+import { buildServer } from './server.js';
 import { createApiKeyChecker } from './auth.js';
 import { createHealthCheck } from './health.js';
 import { createIngestUsage } from './ingest.js';
@@ -23,11 +23,11 @@ interface Stack {
 async function buildStack(queueName: string): Promise<Stack> {
   const connection = await connectRedis(REDIS_URL);
   const { queue, usageQueue } = createBullUsageQueue(connection, queueName);
-  const app = buildApp({
+  const app = buildServer({
     ingest: createIngestUsage({ queue: usageQueue }),
     checkApiKey: createApiKeyChecker(API_KEY),
     health: createHealthCheck({ ping: () => connection.ping(), timeoutMs: 1000 }),
-    bodyLimitBytes: 16_384,
+    config: { bodyLimitBytes: 16_384, corsOrigins: ['http://localhost:5173'] },
   });
   return { app, queue, connection };
 }

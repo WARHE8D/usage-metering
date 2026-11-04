@@ -1,4 +1,4 @@
-import { buildApp } from './app.js';
+import { buildServer } from './server.js';
 import { createApiKeyChecker } from './auth.js';
 import { loadApiConfig } from './config.js';
 import { createHealthCheck } from './health.js';
@@ -25,11 +25,11 @@ const connection = await orExit('Cannot connect to Redis at startup', () =>
 );
 const { queue, usageQueue } = createBullUsageQueue(connection);
 
-const app = buildApp({
+const app = buildServer({
   ingest: createIngestUsage({ queue: usageQueue }),
   checkApiKey: createApiKeyChecker(config.apiKey),
   health: createHealthCheck({ ping: () => connection.ping(), timeoutMs: HEALTH_TIMEOUT_MS }),
-  bodyLimitBytes: config.bodyLimitBytes,
+  config: { bodyLimitBytes: config.bodyLimitBytes, corsOrigins: config.corsOrigins },
   logger: { level: config.logLevel, redact: ['req.headers["x-api-key"]'] },
 });
 

@@ -1,11 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildApp } from './app.js';
+import { buildServer } from './server.js';
 import { createApiKeyChecker } from './auth.js';
 import type { HealthStatus } from './health.js';
 import { createIngestUsage, type UsageQueue } from './ingest.js';
 
 const API_KEY = 'test-api-key-0123456789';
+const ALLOWED_ORIGIN = 'http://localhost:5173';
 const NOW = new Date('2026-01-01T12:00:00.000Z');
 
 const validRecord = {
@@ -35,14 +36,14 @@ function setup(
         : Promise.resolve(undefined);
     },
   };
-  const app = buildApp({
+  const app = buildServer({
     ingest: createIngestUsage({ queue, now: () => NOW }),
     checkApiKey: createApiKeyChecker(API_KEY),
     health: () =>
       opts.healthThrows
         ? Promise.reject(new Error('boom'))
         : Promise.resolve(opts.health ?? { ok: true, redis: 'up' }),
-    bodyLimitBytes: 1024,
+    config: { bodyLimitBytes: 1024, corsOrigins: [ALLOWED_ORIGIN] },
   });
   current = app;
   return { app, added };
@@ -195,5 +196,77 @@ describe('unknown routes', () => {
     const res = await app.inject({ method: 'GET', url: '/nope' });
     expect(res.statusCode).toBe(404);
     expect(res.json()).toEqual({ error: 'not_found', message: 'Route GET /nope not found' });
+  });
+});
+
+describe('CORS', () => {
+  const ACAO = 'access-control-allow-origin';
+
+  it('answers a preflight without an API key and allows x-api-key', async () => {
+    const { app, added } = setup();
+    const res = await app.inject({
+      method: 'OPTIONS',
+      url: '/usage',
+      headers: {
+        origin: ALLOWED_ORIGIN,
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'content-type,x-api-key',
+      },
+    });
+    expect(res.statusCode).toBe(204);
+    expect(res.headers[ACAO]).toBe(ALLOWED_ORIGIN);
+    const allowHeaders = String(res.headers['access-control-allow-headers']).toLowerCase();
+    expect(allowHeaders).toContain('x-api-key');
+    expect(allowHeaders).toContain('content-type');
+    expect(res.headers['access-control-allow-methods']).toBe('GET, POST');
+    expect(res.headers['access-control-allow-credentials']).toBeUndefined();
+    expect(added).toHaveLength(0);
+  });
+
+  it('adds allow-origin to a successful POST from an allowed origin', async () => {
+    const { app } = setup();
+    const res = await postUsage(app, validRecord, { origin: ALLOWED_ORIGIN });
+    expect(res.statusCode).toBe(202);
+    expect(res.headers[ACAO]).toBe(ALLOWED_ORIGIN);
+  });
+
+  it('does not set allow-origin for a disallowed origin (no reflection, no wildcard)', async () => {
+    const { app } = setup();
+    const res = await postUsage(app, validRecord, { origin: 'http://evil.example' });
+    expect(res.headers[ACAO]).toBeUndefined();
+    const preflight = await app.inject({
+      method: 'OPTIONS',
+      url: '/usage',
+      headers: { origin: 'http://evil.example', 'access-control-request-method': 'POST' },
+    });
+    expect(preflight.headers[ACAO]).toBeUndefined();
+  });
+
+  it('keeps allow-origin on a 401 for an allowed origin and still enforces the key', async () => {
+    const { app, added } = setup();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/usage',
+      headers: { origin: ALLOWED_ORIGIN },
+      payload: validRecord,
+    });
+    expect(res.statusCode).toBe(401);
+    expect(res.headers[ACAO]).toBe(ALLOWED_ORIGIN);
+    expect(added).toHaveLength(0);
+  });
+
+  it('keeps allow-origin on 400 and 503 responses for an allowed origin', async () => {
+    const bad = await postUsage(
+      setup().app,
+      { ...validRecord, quantity: 0 },
+      { origin: ALLOWED_ORIGIN },
+    );
+    expect(bad.statusCode).toBe(400);
+    expect(bad.headers[ACAO]).toBe(ALLOWED_ORIGIN);
+    const down = await postUsage(setup({ queueFails: true }).app, validRecord, {
+      origin: ALLOWED_ORIGIN,
+    });
+    expect(down.statusCode).toBe(503);
+    expect(down.headers[ACAO]).toBe(ALLOWED_ORIGIN);
   });
 });

@@ -12,6 +12,7 @@ describe('loadApiConfig', () => {
       redisUrl: 'redis://localhost:6379',
       apiKey: SECRET,
       bodyLimitBytes: 16_384,
+      corsOrigins: ['http://localhost:5173'],
       logLevel: 'info',
     });
   });
@@ -30,6 +31,31 @@ describe('loadApiConfig', () => {
       bodyLimitBytes: 1024,
       logLevel: 'debug',
     });
+  });
+
+  it('parses and trims a comma-separated CORS_ORIGINS list', () => {
+    const config = loadApiConfig({
+      ...base,
+      CORS_ORIGINS: ' http://localhost:5173 , https://app.example.com:8443,, ',
+    });
+    expect(config.corsOrigins).toEqual(['http://localhost:5173', 'https://app.example.com:8443']);
+  });
+
+  it.each([
+    'not-a-url',
+    'http://localhost:5173/path',
+    'http://localhost:5173/',
+    'ftp://x',
+    '',
+    ' , ',
+  ])('rejects invalid CORS_ORIGINS %j', (value) => {
+    expect(() => loadApiConfig({ ...base, CORS_ORIGINS: value })).toThrow('CORS_ORIGINS');
+  });
+
+  it('rejects the list if any single origin is invalid', () => {
+    expect(() => loadApiConfig({ ...base, CORS_ORIGINS: 'http://localhost:5173,ftp://x' })).toThrow(
+      'CORS_ORIGINS',
+    );
   });
 
   it('ignores unrelated env vars', () => {

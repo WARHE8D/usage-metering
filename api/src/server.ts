@@ -1,13 +1,16 @@
+import cors from '@fastify/cors';
+
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import type { ApiKeyChecker } from './auth.js';
+import type { ApiConfig } from './config.js';
 import type { HealthCheck } from './health.js';
 import type { IngestUsage } from './ingest.js';
 
-export interface AppDeps {
+export interface ServerDeps {
   ingest: IngestUsage;
   checkApiKey: ApiKeyChecker;
   health: HealthCheck;
-  bodyLimitBytes: number;
+  config: Pick<ApiConfig, 'bodyLimitBytes' | 'corsOrigins'>;
   logger?: FastifyServerOptions['logger'];
 }
 
@@ -30,11 +33,22 @@ function clientErrorStatus(error: unknown): number | undefined {
 }
 
 /** Builds the HTTP app. No env reads and no network I/O: everything is injected. */
-export function buildApp(deps: AppDeps): FastifyInstance {
-  const app = Fastify({ bodyLimit: deps.bodyLimitBytes, logger: deps.logger ?? false });
+export function buildServer(deps: ServerDeps): FastifyInstance {
+  const app = Fastify({ bodyLimit: deps.config.bodyLimitBytes, logger: deps.logger ?? false });
 
   // Only JSON is accepted; without this, text/plain bodies would be parsed as strings.
   app.removeContentTypeParser('text/plain');
+
+  // Registered on the root instance (@fastify/cors is wrapped in fastify-plugin), so its
+  // onRequest hook runs before the API-key hook in the /usage scope. Hence (a) preflight
+  // OPTIONS is answered by cors itself and never reaches the key check, and (b) allowed
+  // origins get CORS headers on 401/400/503 too. Exact allowlist: no wildcard, no reflection.
+  void app.register(cors, {
+    origin: deps.config.corsOrigins,
+    methods: ['GET', 'POST'],
+    allowedHeaders: ['content-type', 'x-api-key'],
+    credentials: false,
+  });
 
   app.setErrorHandler((error, request, reply) => {
     const status = clientErrorStatus(error);
