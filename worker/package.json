@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@usage-metering/shared": "*",
+    "bullmq": "^6.5.4",
     "ioredis": "^6.0.0",
     "pg": "^8.23.1",
     "pino": "^10.4.0",
