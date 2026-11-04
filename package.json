@@ -22,6 +22,7 @@
     "format:check": "prettier --check .",
     "dev:api": "npm run dev -w api",
     "dev:worker": "npm run dev -w worker",
+    "dev:subscriber": "npm run dev:subscriber -w worker",
     "dev:web": "npm run dev -w web",
     "db:migrate": "npm run migrate -w db"
   },

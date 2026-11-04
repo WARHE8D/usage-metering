@@ -25,16 +25,24 @@ export interface WorkerConfig {
   logLevel: LogLevel;
 }
 
-/** Validates env vars. Errors name the variables but never echo values (URLs hold passwords). */
-export function loadWorkerConfig(env: Record<string, string | undefined>): WorkerConfig {
-  const parsed = envSchema.safeParse(env);
+/** Errors name the variables but never echo values (URLs hold passwords). */
+function parseEnv<T extends z.ZodType>(
+  schema: T,
+  env: Record<string, string | undefined>,
+  what: string,
+): z.infer<T> {
+  const parsed = schema.safeParse(env);
   if (!parsed.success) {
     const problems = parsed.error.issues
       .map((issue) => `${issue.path.map(String).join('.')}: ${issue.message}`)
       .join('; ');
-    throw new Error(`Invalid worker configuration: ${problems}`);
+    throw new Error(`Invalid ${what} configuration: ${problems}`);
   }
-  const c = parsed.data;
+  return parsed.data;
+}
+
+export function loadWorkerConfig(env: Record<string, string | undefined>): WorkerConfig {
+  const c = parseEnv(envSchema, env, 'worker');
   return {
     databaseUrl: c.DATABASE_URL,
     redisUrl: c.REDIS_URL,
@@ -44,4 +52,22 @@ export function loadWorkerConfig(env: Record<string, string | undefined>): Worke
     shutdownTimeoutMs: c.SHUTDOWN_TIMEOUT_MS,
     logLevel: c.LOG_LEVEL,
   };
+}
+
+const subscriberEnvSchema = envSchema.pick({
+  REDIS_URL: true,
+  USAGE_EVENTS_CHANNEL: true,
+  LOG_LEVEL: true,
+});
+
+export interface SubscriberConfig {
+  redisUrl: string;
+  eventsChannel: string;
+  logLevel: LogLevel;
+}
+
+/** The subscriber only needs Redis; it never touches Postgres. */
+export function loadSubscriberConfig(env: Record<string, string | undefined>): SubscriberConfig {
+  const c = parseEnv(subscriberEnvSchema, env, 'subscriber');
+  return { redisUrl: c.REDIS_URL, eventsChannel: c.USAGE_EVENTS_CHANNEL, logLevel: c.LOG_LEVEL };
 }
