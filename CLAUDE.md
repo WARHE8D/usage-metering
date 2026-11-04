@@ -28,6 +28,8 @@ GET /usage serves the React page. Local infra via docker-compose (Postgres + Red
 - Every change ships with tests. Run `npm test` and `npm run build` before saying done.
 - Small commits, Conventional Commits (feat:, fix:, test:, chore:, docs:).
 - Never delete volumes or run destructive docker/git commands unless I ask.
+- Before installing, upgrading or writing code against a package, look up its current,
+  version-specific docs with the Context7 MCP server instead of relying on memory.
 
 ## Commands
 (Planned — update once package.json and docker-compose.yml exist.)
@@ -35,6 +37,3 @@ GET /usage serves the React page. Local infra via docker-compose (Postgres + Red
 - npm run dev:api | dev:worker | dev:web
 - npm test (unit) | npm run test:int (needs docker compose up)
 - npm run build
-
-
--- add Context7 for up-to-date, version-specific documentation and code examples directly from the source. Paste accurate, relevant documentation into tools like Cursor, Claude, or any LLM, and get better answers with no hallucinations.
