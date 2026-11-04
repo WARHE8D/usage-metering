@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "build": "tsc -b",
-    "dev": "tsx watch --conditions=development --env-file-if-exists=.env src/index.ts",
+    "dev": "tsx watch --conditions=development --env-file-if-exists=../.env src/index.ts",
     "start": "node dist/index.js",
-    "dev:subscriber": "tsx watch --conditions=development --env-file-if-exists=.env src/subscriber.ts",
+    "dev:subscriber": "tsx watch --conditions=development --env-file-if-exists=../.env src/subscriber.ts",
     "start:subscriber": "node dist/subscriber.js"
   },
   "dependencies": {
