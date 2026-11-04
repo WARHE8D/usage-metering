@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 /**
  * Queue contract shared by the API (producer) and the worker (consumer).
  * Typed structurally so shared/ does not depend on bullmq; the shape is
@@ -33,4 +35,30 @@ export function usageJobOptions(recordId: string): UsageJobOptions {
     removeOnComplete: { ...USAGE_JOB_KEEP_COMPLETED },
     removeOnFail: false,
   };
+}
+
+export const USAGE_DLQ_JOB_NAME = 'usage.dead-letter';
+
+/** Payload of a job in the dead-letter queue. `record` is the original job data, possibly invalid. */
+export const UsageDlqEntrySchema = z.strictObject({
+  record: z.unknown(),
+  failedReason: z.string(),
+  attemptsMade: z.number().int().nonnegative(),
+  originalJobId: z.string().min(1),
+  failedAt: z.iso.datetime(),
+  queue: z.string().min(1),
+});
+
+export type UsageDlqEntry = z.infer<typeof UsageDlqEntrySchema>;
+
+export interface DlqJobOptions {
+  jobId: string;
+  attempts: 1;
+  removeOnComplete: false;
+  removeOnFail: false;
+}
+
+/** DLQ jobs are kept until someone inspects them; re-adding the same jobId is a no-op. */
+export function dlqJobOptions(jobId: string): DlqJobOptions {
+  return { jobId, attempts: 1, removeOnComplete: false, removeOnFail: false };
 }

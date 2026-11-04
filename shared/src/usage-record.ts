@@ -11,13 +11,18 @@ export interface ParseOptions {
 
 const systemClock: Clock = () => new Date();
 
-/** Builds the schema with an injected clock (for tests / serverless wrappers). */
+/** Field rules shared by the ingest schema and the stored-record (worker) schema. */
+const recordFields = {
+  recordId: z.uuid(),
+  customerId: z.string().min(1).max(64),
+  dimension: z.string().min(1).max(64),
+  quantity: z.number().positive(),
+};
+
+/** Builds the ingest schema with an injected clock (for tests / serverless wrappers). */
 export function createUsageRecordSchema(now: Clock = systemClock) {
   return z.strictObject({
-    recordId: z.uuid(),
-    customerId: z.string().min(1).max(64),
-    dimension: z.string().min(1).max(64),
-    quantity: z.number().positive(),
+    ...recordFields,
     timestamp: z.iso.datetime().refine(
       (value) => {
         // Malformed or non-UTC values are already reported by the datetime format check.
@@ -34,6 +39,16 @@ export function createUsageRecordSchema(now: Clock = systemClock) {
 
 export const UsageRecordSchema = createUsageRecordSchema();
 
+/**
+ * Schema for records already accepted at ingest (e.g. queue job data). Same field
+ * rules, but no "future" check: that rule is relative to ingest time, and a job
+ * retried or processed from a backlog later must not fail because of it.
+ */
+export const StoredUsageRecordSchema = z.strictObject({
+  ...recordFields,
+  timestamp: z.iso.datetime(),
+});
+
 export type UsageRecord = z.infer<typeof UsageRecordSchema>;
 
 export interface UsageRecordError {
@@ -44,12 +59,7 @@ export interface UsageRecordError {
 export type ParseUsageRecordResult =
   { ok: true; data: UsageRecord } | { ok: false; errors: UsageRecordError[] };
 
-export function parseUsageRecord(
-  input: unknown,
-  options: ParseOptions = {},
-): ParseUsageRecordResult {
-  const schema = options.now ? createUsageRecordSchema(options.now) : UsageRecordSchema;
-  const result = schema.safeParse(input);
+function toResult(result: ReturnType<typeof UsageRecordSchema.safeParse>): ParseUsageRecordResult {
   if (result.success) {
     return { ok: true, data: result.data };
   }
@@ -60,4 +70,18 @@ export function parseUsageRecord(
       message: issue.message,
     })),
   };
+}
+
+/** Validates a record at ingest (includes the "not more than 5 minutes in the future" rule). */
+export function parseUsageRecord(
+  input: unknown,
+  options: ParseOptions = {},
+): ParseUsageRecordResult {
+  const schema = options.now ? createUsageRecordSchema(options.now) : UsageRecordSchema;
+  return toResult(schema.safeParse(input));
+}
+
+/** Validates a previously accepted record (format only; no future-timestamp rule). */
+export function parseStoredUsageRecord(input: unknown): ParseUsageRecordResult {
+  return toResult(StoredUsageRecordSchema.safeParse(input));
 }

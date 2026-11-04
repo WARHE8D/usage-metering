@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   createUsageRecordSchema,
+  parseStoredUsageRecord,
   parseUsageRecord,
   UsageRecordSchema,
   type ParseUsageRecordResult,
@@ -165,5 +166,43 @@ describe('schemas', () => {
     const input = { ...valid, timestamp: '2029-12-31T23:59:00Z' };
     expect(createUsageRecordSchema(late).safeParse(input).success).toBe(true);
     expect(createUsageRecordSchema(now).safeParse(input).success).toBe(false);
+  });
+});
+
+describe('parseStoredUsageRecord (worker side)', () => {
+  it('accepts a timestamp far in the future, since the rule only applies at ingest', () => {
+    const farFuture = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    expect(parseStoredUsageRecord({ ...valid, timestamp: farFuture }).ok).toBe(true);
+  });
+
+  it('accepts a timestamp days in the past (backlog / late retry)', () => {
+    expect(parseStoredUsageRecord({ ...valid, timestamp: '2020-01-01T00:00:00.000Z' }).ok).toBe(
+      true,
+    );
+  });
+
+  it('still applies every field rule', () => {
+    const result = parseStoredUsageRecord({
+      ...valid,
+      recordId: 'nope',
+      customerId: '',
+      quantity: 0,
+      timestamp: '2026-01-01T11:00:00+02:00',
+      extra: 1,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.map((e) => e.path).sort()).toEqual([
+        '',
+        'customerId',
+        'quantity',
+        'recordId',
+        'timestamp',
+      ]);
+    }
+  });
+
+  it.each([null, undefined, 'x', 1, []])('rejects non-object %j', (input) => {
+    expect(parseStoredUsageRecord(input).ok).toBe(false);
   });
 });
